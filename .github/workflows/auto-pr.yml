@@ -1,0 +1,39 @@
+name: Auto Pull Request
+on:
+  push:
+    branches-ignore:
+      - main   
+      - master 
+
+jobs:
+  auto-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request
+        uses: repo-sync/pull-request@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          destination_branch: "main"
+          pr_title: "Automatic PR from ${{ github.ref_name }}"
+          pr_body: |
+            🤖 Automatic Pull Request
+
+            ## Deadline
+            **Due Date:** [YYYY-MM-DD]
+
+            ## Related Issue
+            Fixes #[issue-number]
+            
+            ## Description
+            [Provide a brief description of the changes]
+            
+            ---
+            Branch: ${{ github.ref_name }}
+            Author: @${{ github.actor }}
+
+          pr_reviewer: "KacperMachnik,miskrz0421,Tomciom,PiotrWaluszek"
+          pr_draft: false
