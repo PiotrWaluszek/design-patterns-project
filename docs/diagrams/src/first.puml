@@ -1,1 +1,227 @@
-code
+@startuml
+
+skinparam class {
+    BackgroundColor white
+    ArrowColor black
+    BorderColor black
+}
+
+class DatabaseConnectionFactory {
+    -instance: DatabaseConnectionFactory
+    -connections: Map<String, DatabaseConnection>
+    -logger: Logger
+    -constructor()
+    +getInstance(): DatabaseConnectionFactory
+    +getConnection(type: String): DatabaseConnection
+    +registerConnection(type: String, connection: DatabaseConnection)
+}
+
+note right of DatabaseConnectionFactory
+    Singleton Pattern:
+    Ensures single instance of connection factory
+end note
+
+class Logger {
+    -instance: Logger
+    -logFile: String
+    -constructor()
+    +getInstance(): Logger
+    +log(message: String)
+    +error(message: String)
+    +debug(message: String)
+}
+
+note right of Logger
+    Singleton Pattern:
+    Single logger instance for entire application
+end note
+
+interface ConnectionFactory {
+    +createConnection(type: String): DatabaseConnection
+}
+
+note right of ConnectionFactory
+    Factory Pattern:
+    Creates different types of database connections
+end note
+
+abstract class DatabaseConnection {
+    -url: String
+    -username: String
+    -password: String
+    -connection: Connection
+    +connect(): Connection
+    +disconnect()
+    +executeQuery(query: String): ResultSet
+    +createConnection(): Connection
+}
+
+class SQLiteConnection extends DatabaseConnection {
+    +createConnection(): Connection
+}
+
+class PostgresConnection extends DatabaseConnection {
+    +createConnection(): Connection
+}
+
+class MySQLConnection extends DatabaseConnection {
+    +createConnection(): Connection
+}
+
+class EntityManager {
+    -connection: DatabaseConnection
+    -mapper: EntityMapper
+    -strategy: QueryStrategy
+    -logger: Logger
+    +save(entity: T)
+    +find(id: Any): T
+    +update(entity: T)
+    +delete(entity: T)
+    +setQueryStrategy(strategy: QueryStrategy)
+}
+
+interface EntityMapper {
+    +mapToEntity(resultSet: ResultSet): T
+    +mapToDatabase(entity: T): Map<String, Any>
+}
+
+class UserMapper implements EntityMapper {
+    +mapToEntity(resultSet: ResultSet): User
+    +mapToDatabase(entity: User): Map<String, Any>
+}
+
+class QueryBuilder {
+    -queryStrategy: QueryStrategy
+    -logger: Logger
+    +select(): SelectQueryBuilder
+    +insert(): InsertQueryBuilder
+    +update(): UpdateQueryBuilder
+    +delete(): DeleteQueryBuilder
+}
+
+note right of QueryBuilder
+    Builder Pattern:
+    Fluent interface for building queries
+end note
+
+class SelectQueryBuilder {
+    -tableName: String
+    -columns: List<String>
+    -conditions: Map<String, Any>
+    -logger: Logger
+    +from(tableName: String): SelectQueryBuilder
+    +columns(columns: List<String>): SelectQueryBuilder
+    +where(condition: String, value: Any): SelectQueryBuilder
+    +orderBy(column: String, direction: String): SelectQueryBuilder
+    +limit(limit: Int): SelectQueryBuilder
+    +offset(offset: Int): SelectQueryBuilder
+    +join(table: String, condition: String): SelectQueryBuilder
+    +build(): SelectQueryStrategy
+}
+
+class InsertQueryBuilder {
+    -tableName: String
+    -values: Map<String, Any>
+    -logger: Logger
+    +into(tableName: String): InsertQueryBuilder
+    +columns(columns: List<String>): InsertQueryBuilder
+    +values(values: Map<String, Any>): InsertQueryBuilder
+    +build(): InsertQueryStrategy
+}
+
+class UpdateQueryBuilder {
+    -tableName: String
+    -values: Map<String, Any>
+    -conditions: Map<String, Any>
+    -logger: Logger
+    +table(tableName: String): UpdateQueryBuilder
+    +set(column: String, value: Any): UpdateQueryBuilder
+    +where(condition: String, value: Any): UpdateQueryBuilder
+    +build(): UpdateQueryStrategy
+}
+
+class DeleteQueryBuilder {
+    -tableName: String
+    -conditions: Map<String, Any>
+    -logger: Logger
+    +from(tableName: String): DeleteQueryBuilder
+    +where(condition: String, value: Any): DeleteQueryBuilder
+    +build(): DeleteQueryStrategy
+}
+
+interface QueryStrategy {
+    +execute(query: String): ResultSet
+    +buildQuery(): String
+}
+
+note right of QueryStrategy
+    Strategy Pattern:
+    Different strategies for query execution
+end note
+
+class SelectQueryStrategy implements QueryStrategy {
+    -tableName: String
+    -columns: List<String>
+    -conditions: Map<String, Any>
+    -orderBy: String
+    -limit: Int
+    -offset: Int
+    -joins: List<String>
+    -logger: Logger
+    +execute(query: String): ResultSet
+    +buildQuery(): String
+}
+
+class InsertQueryStrategy implements QueryStrategy {
+    -tableName: String
+    -columns: List<String>
+    -values: Map<String, Any>
+    -logger: Logger
+    +execute(query: String): ResultSet
+    +buildQuery(): String
+}
+
+class UpdateQueryStrategy implements QueryStrategy {
+    -tableName: String
+    -values: Map<String, Any>
+    -conditions: Map<String, Any>
+    -logger: Logger
+    +execute(query: String): ResultSet
+    +buildQuery(): String
+}
+
+class DeleteQueryStrategy implements QueryStrategy {
+    -tableName: String
+    -conditions: Map<String, Any>
+    -logger: Logger
+    +execute(query: String): ResultSet
+    +buildQuery(): String
+}
+
+DatabaseConnectionFactory --> DatabaseConnection
+DatabaseConnectionFactory --> Logger
+ConnectionFactory --> DatabaseConnection
+EntityManager --> DatabaseConnection
+EntityManager --> EntityMapper
+EntityManager --> QueryStrategy
+EntityManager --> Logger
+QueryBuilder --> QueryStrategy
+QueryBuilder --> Logger
+DatabaseConnectionFactory ..> ConnectionFactory : uses
+
+QueryBuilder --> SelectQueryBuilder
+QueryBuilder --> InsertQueryBuilder
+QueryBuilder --> UpdateQueryBuilder
+QueryBuilder --> DeleteQueryBuilder
+
+SelectQueryBuilder ..> SelectQueryStrategy : creates
+InsertQueryBuilder ..> InsertQueryStrategy : creates
+UpdateQueryBuilder ..> UpdateQueryStrategy : creates
+DeleteQueryBuilder ..> DeleteQueryStrategy : creates
+
+SelectQueryBuilder --> Logger
+InsertQueryBuilder --> Logger
+UpdateQueryBuilder --> Logger
+DeleteQueryBuilder --> Logger
+
+@enduml
