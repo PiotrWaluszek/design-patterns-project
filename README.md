@@ -24,10 +24,10 @@ The architecture of our ORM framework is represented in the class diagram below.
 - Strategy Pattern
 
 ## Authors
-- **Kacper Machnik**
-- **Michał Krzempek**
-- **Piotr Waluszek**
-- **Tomasz Madeja**
+- **[Kacper Machnik](https://github.com/KacperMachnik)**
+- **[Michał Krzempek](https://github.com/miskrz0421)**
+- **[Piotr Waluszek](https://github.com/PiotrWaluszek)**
+- **[Tomasz Madeja](https://github.com/Tomciom)**
 
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
