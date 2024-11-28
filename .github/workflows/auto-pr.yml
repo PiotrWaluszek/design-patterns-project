@@ -22,10 +22,18 @@ jobs:
           pr_body: |
             🤖 Automatic Pull Request
 
-            Branch: ${{ github.ref_name }}
-            Triggered by: @${{ github.actor }}
+            ## Deadline
+            **Due Date:** [YYYY-MM-DD]
+
+            ## Related Issue
+            Fixes #[issue-number]
             
-            ## Changes
-            ${{ github.event.head_commit.message }}
+            ## Description
+            [Provide a brief description of the changes]
+            
+            ---
+            Branch: ${{ github.ref_name }}
+            Author: @${{ github.actor }}
+
           pr_reviewer: "KacperMachnik,miskrz0421,Tomciom,PiotrWaluszek"
           pr_draft: false
