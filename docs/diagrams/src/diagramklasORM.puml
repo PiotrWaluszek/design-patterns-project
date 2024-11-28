@@ -348,14 +348,9 @@ DatabaseConnectionFactory --> Logger
 ConnectionFactory --> DatabaseConnection
 DatabaseConnectionFactory ..> ConnectionFactory : uses
 
-Table <|-- PhysicalTable
-Table <|-- VirtualTable
 VirtualTable --> TableOperation
 TableOperation --> Table : sources
-UnionOperation --|> TableOperation
-JoinOperation --|> TableOperation
-ExceptOperation --|> TableOperation
-IntersectOperation --|> TableOperation
+
 
 Table --> Column : contains
 Table --> Constraint : has
