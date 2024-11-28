@@ -233,12 +233,85 @@ note right of QueryBuilder
     different types of database queries
 end note
 
+' Command Pattern Implementation
+abstract class DatabaseCommand {
+    #connection: DatabaseConnection
+    #logger: Logger
+    +execute(): ResultSet
+    +buildQuery(): String
+    +validate(): Boolean
+    #handleError(error: Exception)
+}
+
+note right of DatabaseCommand
+    Command Pattern:
+    Encapsulates database operations as objects
+end note
+
+class CommandExecutor {
+    -connection: DatabaseConnection
+    -logger: Logger
+    +execute(command: DatabaseCommand): ResultSet
+    +executeTransaction(commands: List<DatabaseCommand>): List<ResultSet>
+    -handleTransactionRollback()
+}
+
+class SelectCommand extends DatabaseCommand {
+    -table: Table
+    -columns: List<Column<*>>
+    -condition: Condition?
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class InsertCommand extends DatabaseCommand {
+    -table: Table
+    -columns: List<Column<*>>
+    -values: Map<Column<*>, Any>
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class UpdateCommand extends DatabaseCommand {
+    -table: Table
+    -values: Map<Column<*>, Any>
+    -condition: Condition?
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class DeleteCommand extends DatabaseCommand {
+    -table: Table
+    -condition: Condition?
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class CreateTableCommand extends DatabaseCommand {
+    -table: Table
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class AlterTableCommand extends DatabaseCommand {
+    -table: Table
+    -alterations: List<Alteration>
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
+class DropTableCommand extends DatabaseCommand {
+    -table: Table
+    +execute(): ResultSet
+    +buildQuery(): String
+}
+
 class SelectQueryBuilder {
     -table: Table
     -columns: List<Column<*>>
     +columns(vararg columns: Column<*>): SelectQueryBuilder
     +where(condition: (Table) -> Condition): SelectQueryBuilder
-    +build(): SelectQueryStrategy
+    +build(): SelectCommand
 }
 
 class InsertQueryBuilder {
@@ -246,7 +319,7 @@ class InsertQueryBuilder {
     -columns: List<Column<*>>
     +columns(vararg columns: Column<*>): InsertQueryBuilder
     +values(values: Map<Column<*>, Any>): InsertQueryBuilder
-    +build(): InsertQueryStrategy
+    +build(): InsertCommand
 }
 
 class UpdateQueryBuilder {
@@ -254,18 +327,18 @@ class UpdateQueryBuilder {
     -values: Map<Column<*>, Any>
     +set(column: Column<*>, value: Any): UpdateQueryBuilder
     +where(condition: (Table) -> Condition): UpdateQueryBuilder
-    +build(): UpdateQueryStrategy
+    +build(): UpdateCommand
 }
 
 class DeleteQueryBuilder {
     -table: Table
     +where(condition: (Table) -> Condition): DeleteQueryBuilder
-    +build(): DeleteQueryStrategy
+    +build(): DeleteCommand
 }
 
 class CreateTableQueryBuilder {
     -table: Table
-    +build(): CreateTableQueryStrategy
+    +build(): CreateTableCommand
 }
 
 class AlterTableQueryBuilder {
@@ -273,73 +346,12 @@ class AlterTableQueryBuilder {
     -alterations: List<Alteration>
     +addColumn(column: Column<*>): AlterTableQueryBuilder
     +dropColumn(name: String): AlterTableQueryBuilder
-    +build(): AlterTableQueryStrategy
+    +build(): AlterTableCommand
 }
 
 class DropTableQueryBuilder {
     -table: Table
-    +build(): DropTableQueryStrategy
-}
-
-interface QueryStrategy {
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-note right of QueryStrategy
-    Strategy Pattern:
-    Encapsulates different algorithms
-    for executing database queries
-end note
-
-class SelectQueryStrategy implements QueryStrategy {
-    -table: Table
-    -columns: List<Column<*>>
-    -condition: Condition?
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class InsertQueryStrategy implements QueryStrategy {
-    -table: Table
-    -columns: List<Column<*>>
-    -values: Map<Column<*>, Any>
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class UpdateQueryStrategy implements QueryStrategy {
-    -table: Table
-    -values: Map<Column<*>, Any>
-    -condition: Condition?
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class DeleteQueryStrategy implements QueryStrategy {
-    -table: Table
-    -condition: Condition?
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class CreateTableQueryStrategy implements QueryStrategy {
-    -table: Table
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class AlterTableQueryStrategy implements QueryStrategy {
-    -table: Table
-    -alterations: List<Alteration>
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
-}
-
-class DropTableQueryStrategy implements QueryStrategy {
-    -table: Table
-    +execute(connection: DatabaseConnection): ResultSet
-    +buildQuery(): String
+    +build(): DropTableCommand
 }
 
 ' Relationships
@@ -350,7 +362,6 @@ DatabaseConnectionFactory ..> ConnectionFactory : uses
 
 VirtualTable --> TableOperation
 TableOperation --> Table : sources
-
 
 Table --> Column : contains
 Table --> Constraint : has
@@ -373,18 +384,23 @@ QueryBuilder --> DeleteQueryBuilder
 QueryBuilder --> CreateTableQueryBuilder
 QueryBuilder --> AlterTableQueryBuilder
 QueryBuilder --> DropTableQueryBuilder
-
 QueryBuilder --> Table : uses structure
 
-SelectQueryBuilder ..> SelectQueryStrategy : creates
-InsertQueryBuilder ..> InsertQueryStrategy : creates
-UpdateQueryBuilder ..> UpdateQueryStrategy : creates
-DeleteQueryBuilder ..> DeleteQueryStrategy : creates
-CreateTableQueryBuilder ..> CreateTableQueryStrategy : creates
-AlterTableQueryBuilder ..> AlterTableQueryStrategy : creates
-DropTableQueryBuilder ..> DropTableQueryStrategy : creates
+SelectQueryBuilder ..> SelectCommand : creates
+InsertQueryBuilder ..> InsertCommand : creates
+UpdateQueryBuilder ..> UpdateCommand : creates
+DeleteQueryBuilder ..> DeleteCommand : creates
+CreateTableQueryBuilder ..> CreateTableCommand : creates
+AlterTableQueryBuilder ..> AlterTableCommand : creates
+DropTableQueryBuilder ..> DropTableCommand : creates
 
-QueryStrategy --> DatabaseConnection : executes through
+DatabaseCommand --> DatabaseConnection : executes through
+DatabaseCommand --> Logger : logs through
+
+CommandExecutor --> DatabaseConnection
+CommandExecutor --> Logger
+CommandExecutor --> DatabaseCommand : executes
+
 QueryBuilder --> Logger
 
 SelectQueryBuilder --> Logger
@@ -397,4 +413,5 @@ DropTableQueryBuilder --> Logger
 
 JoinOperation --> JoinType : uses
 ForeignKeyConstraint --> ReferentialAction : uses
+
 @enduml
