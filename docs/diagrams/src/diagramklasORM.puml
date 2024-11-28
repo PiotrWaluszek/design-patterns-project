@@ -373,7 +373,6 @@ QueryBuilder --> DeleteQueryBuilder
 QueryBuilder --> CreateTableQueryBuilder
 QueryBuilder --> AlterTableQueryBuilder
 QueryBuilder --> DropTableQueryBuilder
-
 QueryBuilder --> Table : uses structure
 
 SelectQueryBuilder ..> SelectQueryStrategy : creates
