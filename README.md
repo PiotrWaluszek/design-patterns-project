@@ -8,7 +8,7 @@ This project demonstrates the implementation of a flexible and type-safe ORM sys
 
 ## Architecture
 
-The architecture of our ORM framework is represented in the class diagram below. It shows the core components and their relationships, including database connection management, query building system, table operations, and various design patterns implementation. The diagram illustrates how different modules interact with each other to provide a cohesive database management solution.
+The architecture of our ORM framework is represented in the class diagram below. It shows the core components and their relationships, including database connection management, query building system, table operations and various design patterns implementation. The diagram illustrates how different modules interact with each other to provide a cohesive database management solution.
 
 ![Database Architecture Class Diagram](docs/diagrams/images/diagram-klas.drawio.svg?raw=true)
 

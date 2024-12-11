@@ -21,8 +21,8 @@ This document provides an overview of a comprehensive database management system
 
 - Supports multiple database types:
   - SQLite
-  - PostgreSQL
   - MySQL
+  - PostgreSQL
 - Each database type has specialized connection handling and features
 
 ### Table Management
