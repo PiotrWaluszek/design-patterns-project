@@ -15,7 +15,13 @@ abstract class Table<T : Entity>(
     private val entityClass: KClass<T>,
 ) {
     private val _foreignKeys = mutableListOf<ForeignKey>()
+    val foreignKeys: List<ForeignKey>
+        get() = _foreignKeys.toList()
+    
     private val _relations = mutableListOf<Relation<*>>()
+    val relations: List<Relation<*>>
+        get() = _relations.toList()
+    
     private val _columns = mutableListOf<Column<*>>()
     val columns: List<Column<*>>
         get() = _columns.toList()

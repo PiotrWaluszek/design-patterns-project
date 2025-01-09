@@ -2,48 +2,42 @@ package ormapping.command
 
 import ormapping.connection.DatabaseConnection
 import ormapping.entity.Entity
+import ormapping.table.CascadeType
+import ormapping.table.Relation
+import ormapping.table.RelationType
 import ormapping.table.Table
 import java.math.BigDecimal
 import java.sql.Date
-import java.sql.SQLException
 import java.time.LocalDate
+import kotlin.reflect.KClass
+import kotlin.reflect.full.memberProperties
 
 class CommandExecutor(
     private val connection: DatabaseConnection,
 ) {
-    @Suppress("UNCHECKED_CAST")
     fun <T : Entity> find(table: Table<T>, value: Any): T? {
-        val primaryKeyColumn = table.primaryKey
-            ?: throw IllegalStateException("Table ${table._name} has no primary key defined")
-        
-        if (value::class != primaryKeyColumn.type) {
-            throw IllegalArgumentException(
-                "Value type ${value::class} doesn't match primary key type ${primaryKeyColumn.type}"
-            )
+        val primaryKeyColumns = table.primaryKey
+        if (primaryKeyColumns.isEmpty()) {
+            throw IllegalArgumentException("Table must have primary keys defined")
         }
-        
         val sql = buildString {
             append("SELECT ")
             append(table.columns.joinToString(", ") { it.name })
             append(" FROM ")
             append(table._name)
             append(" WHERE ")
-            append(primaryKeyColumn.name)
-            append(" = ?")
+            append(primaryKeyColumns.joinToString(" AND ") { "${it.name} = ?" })
         }
         
         return connection.getConnection().prepareStatement(sql).use { statement ->
-            when (value) {
-                is Int -> statement.setInt(1, value)
-                is String -> statement.setString(1, value)
-                is Boolean -> statement.setBoolean(1, value)
-                is LocalDate -> statement.setDate(1, Date.valueOf(value))
-                is BigDecimal -> statement.setBigDecimal(1, value)
-                else -> throw IllegalArgumentException("Unsupported primary key type: ${value::class}")
+            primaryKeyColumns.forEachIndexed { index, column ->
+                setParameter(statement, index + 1, value, column.type)
             }
             val resultSet = statement.executeQuery()
             if (resultSet.next()) {
-                table.toEntity(resultSet)
+                val entity = table.toEntity(resultSet)
+                loadRelations(table, entity)
+                entity
             } else {
                 null
             }
@@ -53,197 +47,282 @@ class CommandExecutor(
     fun <T : Entity> persist(
         table: Table<T>,
         vararg entities: T,
-        onDuplicateKey: DuplicateKeyStrategy = DuplicateKeyStrategy.ERROR,
     ) {
         if (entities.isEmpty()) return
         
-        val primaryKey = table.primaryKey
-            ?: throw IllegalStateException("Table ${table._name} has no primary key defined")
-        
-        val primaryKeyValues = entities.map { entity ->
-            table.fromEntity(entity)[primaryKey]
+        val sql = buildString {
+            append("INSERT INTO ")
+            append(table._name)
+            append(" (")
+            append(table.columns.joinToString(", ") { it.name })
+            append(") VALUES (")
+            append(table.columns.joinToString(", ") { "?" })
+            append(")")
         }
         
-        if (primaryKeyValues.size != primaryKeyValues.distinct().size && onDuplicateKey == DuplicateKeyStrategy.ERROR) {
-            throw IllegalArgumentException("Provided entities contain duplicate primary keys")
-        }
-        
-        val columnValueMap = table.fromEntity(entities.first())
-        val columns = columnValueMap.keys
-        val dialect = connection.getDialect()
-        
-        val sql = when (onDuplicateKey) {
-            DuplicateKeyStrategy.ERROR -> buildString {
-                append("INSERT INTO ${table._name} (")
-                append(columns.joinToString(", ") { it.name })
-                append(") VALUES (")
-                append(columns.joinToString(", ") { "?" })
-                append(")")
-            }
-            
-            DuplicateKeyStrategy.UPDATE -> buildString {
-                // Używamy dialektu dla składni UPSERT
-                append("INSERT INTO ${table._name} (")
-                append(columns.joinToString(", ") { it.name })
-                append(") VALUES (")
-                append(columns.joinToString(", ") { "?" })
-                append(") ")
-                append(dialect.getUpsertSyntax())
-                append("(${primaryKey.name}) DO UPDATE SET ")
-                append(
-                    columns.filterNot { it.primaryKey }
-                        .joinToString(", ") { "${it.name} = excluded.${it.name}" }
-                )
-            }
-            
-            DuplicateKeyStrategy.IGNORE -> buildString {
-                append(dialect.getInsertIgnoreSyntax())
-                append(" ${table._name} (")
-                append(columns.joinToString(", ") { it.name })
-                append(") VALUES (")
-                append(columns.joinToString(", ") { "?" })
-                append(")")
-            }
-        }
-        
-        try {
-            connection.getConnection().prepareStatement(sql).use { statement ->
-                for (entity in entities) {
-                    val values = table.fromEntity(entity)
-                    var parameterIndex = 1
-                    
-                    for (column in columns) {
-                        val value = values[column]
-                        when (column.type) {
-                            Int::class -> statement.setInt(parameterIndex, value as Int)
-                            String::class -> statement.setString(parameterIndex, value as String)
-                            Boolean::class -> statement.setBoolean(parameterIndex, value as Boolean)
-                            LocalDate::class -> statement.setDate(
-                                parameterIndex,
-                                if (value != null) java.sql.Date.valueOf(value as LocalDate) else null
-                            )
-                            
-                            BigDecimal::class -> statement.setBigDecimal(parameterIndex, value as BigDecimal)
-                            else -> throw IllegalArgumentException("Unsupported type: ${column.type}")
-                        }
-                        parameterIndex++
-                    }
-                    
-                    statement.addBatch()
+        connection.getConnection().prepareStatement(sql).use { statement ->
+            entities.forEach { entity ->
+                val values = table.fromEntity(entity)
+                table.columns.forEachIndexed { index, column ->
+                    setParameter(statement, index + 1, values[column], column.type)
                 }
-                
-                statement.executeBatch()
+                statement.addBatch()
+                saveRelations(table, entity)
             }
-        } catch (e: SQLException) {
-            when {
-                e.message?.contains("Duplicate entry", ignoreCase = true) == true ->
-                    throw DuplicateKeyException("Attempt to insert duplicate key in table ${table._name}", e)
-                
-                else -> throw e
-            }
+            statement.executeBatch()
         }
     }
     
     fun <T : Entity> delete(table: Table<T>, id: Any): Boolean {
-        val primaryKeyColumn = table.primaryKey
-            ?: throw IllegalStateException("Table ${table._name} has no primary key defined")
-        
-        if (id::class != primaryKeyColumn.type) {
-            throw IllegalArgumentException(
-                "Value type ${id::class} doesn't match primary key type ${primaryKeyColumn.type}"
-            )
+        val primaryKeyColumns = table.primaryKey
+        if (primaryKeyColumns.isEmpty()) {
+            throw IllegalArgumentException("Table must have primary keys defined")
         }
         
-        val sql = """
-            DELETE FROM ${table._name}
-            WHERE ${primaryKeyColumn.name} = ?
-        """.trimIndent()
+        val sql = buildString {
+            append("DELETE FROM ")
+            append(table._name)
+            append(" WHERE ")
+            append(primaryKeyColumns.joinToString(" AND ") { "${it.name} = ?" })
+        }
+        
+        cascadeDelete(table, id)
         
         return connection.getConnection().prepareStatement(sql).use { statement ->
-            when (id) {
-                is Int -> statement.setInt(1, id)
-                is String -> statement.setString(1, id)
-                is Boolean -> statement.setBoolean(1, id)
-                is LocalDate -> statement.setDate(1, java.sql.Date.valueOf(id))
-                is BigDecimal -> statement.setBigDecimal(1, id)
-                else -> throw IllegalArgumentException("Unsupported primary key type: ${id::class}")
+            primaryKeyColumns.forEachIndexed { index, column ->
+                setParameter(statement, index + 1, id, column.type)
             }
-            
             statement.executeUpdate() > 0
         }
     }
     
     fun <T : Entity> update(table: Table<T>, entity: T): Boolean {
-        val primaryKeyColumn = table.primaryKey
-            ?: throw IllegalStateException("Table ${table._name} has no primary key defined")
-        
         val columnValues = table.fromEntity(entity)
-        
-        val primaryKeyValue = columnValues[primaryKeyColumn]
-            ?: throw IllegalArgumentException("Primary key value cannot be null")
-        
-        val columnsToUpdate = columnValues.keys.filterNot { it.primaryKey }
-        
-        if (columnsToUpdate.isEmpty()) {
-            return false
+        val primaryKeyColumns = table.primaryKey
+        if (primaryKeyColumns.isEmpty()) {
+            throw IllegalArgumentException("Table must have primary keys defined")
         }
         
+        val columnsToUpdate = table.columns.filterNot { it.primaryKey }
+        
         val sql = buildString {
-            append("UPDATE ${table._name} SET ")
+            append("UPDATE ")
+            append(table._name)
+            append(" SET ")
             append(columnsToUpdate.joinToString(", ") { "${it.name} = ?" })
-            append(" WHERE ${primaryKeyColumn.name} = ?")
+            append(" WHERE ")
+            append(primaryKeyColumns.joinToString(" AND ") { "${it.name} = ?" })
         }
         
         return connection.getConnection().prepareStatement(sql).use { statement ->
             var parameterIndex = 1
-            
-            for (column in columnsToUpdate) {
-                val value = columnValues[column]
-                when (column.type) {
-                    Int::class -> statement.setInt(parameterIndex, value as Int)
-                    String::class -> statement.setString(parameterIndex, value as String)
-                    Boolean::class -> statement.setBoolean(parameterIndex, value as Boolean)
-                    LocalDate::class -> statement.setDate(
-                        parameterIndex,
-                        if (value != null) java.sql.Date.valueOf(value as LocalDate) else null
-                    )
-                    
-                    BigDecimal::class -> statement.setBigDecimal(parameterIndex, value as BigDecimal)
-                    else -> throw IllegalArgumentException("Unsupported type: ${column.type}")
-                }
-                parameterIndex++
+            columnsToUpdate.forEach { column ->
+                setParameter(statement, parameterIndex++, columnValues[column], column.type)
             }
-            
-            when (primaryKeyColumn.type) {
-                Int::class -> statement.setInt(parameterIndex, primaryKeyValue as Int)
-                String::class -> statement.setString(parameterIndex, primaryKeyValue as String)
-                Boolean::class -> statement.setBoolean(parameterIndex, primaryKeyValue as Boolean)
-                LocalDate::class -> statement.setDate(
-                    parameterIndex,
-                    java.sql.Date.valueOf(primaryKeyValue as LocalDate)
-                )
-                
-                BigDecimal::class -> statement.setBigDecimal(parameterIndex, primaryKeyValue as BigDecimal)
-                else -> throw IllegalArgumentException("Unsupported primary key type: ${primaryKeyColumn.type}")
+            primaryKeyColumns.forEach { column ->
+                setParameter(statement, parameterIndex++, columnValues[column], column.type)
             }
-            
+            saveRelations(table, entity)
             statement.executeUpdate() > 0
         }
     }
     
-    
     inline fun <reified T : Entity> persistAll(
         table: Table<T>, entities: Collection<T>,
-        onDuplicateKey: DuplicateKeyStrategy = DuplicateKeyStrategy.ERROR,
     ) {
-        persist(table, *entities.toTypedArray(), onDuplicateKey = onDuplicateKey)
+        persist(table, *entities.toTypedArray())
+    }
+    
+    private fun setParameter(statement: java.sql.PreparedStatement, index: Int, value: Any?, type: KClass<*>) {
+        when (type) {
+            Int::class -> statement.setInt(index, value as Int)
+            String::class -> statement.setString(index, value as String)
+            Boolean::class -> statement.setBoolean(index, value as Boolean)
+            LocalDate::class -> statement.setDate(index, if (value != null) Date.valueOf(value as LocalDate) else null)
+            BigDecimal::class -> statement.setBigDecimal(index, value as BigDecimal)
+            else -> throw IllegalArgumentException("Unsupported type: $type")
+        }
+    }
+    
+    private fun <T : Entity> loadRelations(table: Table<T>, entity: T) {
+        table.relations.forEach { relation ->
+            val sql = when (relation.type) {
+                RelationType.ONE_TO_ONE -> buildOneToOneQuery(table, relation)
+                RelationType.ONE_TO_MANY -> buildOneToManyQuery(table, relation)
+                RelationType.MANY_TO_ONE -> buildManyToOneQuery(table, relation)
+                RelationType.MANY_TO_MANY -> buildManyToManyQuery(table, relation)
+            }
+            
+            val columnValues = table.fromEntity(entity)
+            val primaryKeyValues = columnValues.entries
+                .filter { it.key.primaryKey }
+                .map { it.value }
+            
+            connection.getConnection().prepareStatement(sql).use { statement ->
+                primaryKeyValues.forEachIndexed { index, value ->
+                    val column = table.primaryKey[index]
+                    setParameter(statement, index + 1, value, column.type)
+                }
+                
+                val resultSet = statement.executeQuery()
+                val relatedEntities = mutableListOf<Entity>()
+                
+                while (resultSet.next()) {
+                    @Suppress("UNCHECKED_CAST")
+                    val relatedEntity = relation.targetTable.toEntity(resultSet)
+                    relatedEntities.add(relatedEntity)
+                }
+                
+                val property = entity::class.memberProperties.find { it.name == relation.joinTableName }
+                
+                when (relation.type) {
+                    RelationType.ONE_TO_ONE, RelationType.MANY_TO_ONE -> {
+                        if (relatedEntities.isNotEmpty()) {
+                            val setter = entity::class.members
+                                .find { it.name == "${property?.name}_setter" }
+                            setter?.call(entity, relatedEntities.first())
+                        }
+                    }
+                    
+                    RelationType.ONE_TO_MANY, RelationType.MANY_TO_MANY -> {
+                        @Suppress("UNCHECKED_CAST")
+                        (property?.call(entity) as? MutableSet<Entity>)?.apply {
+                            clear()
+                            addAll(relatedEntities)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun <T : Entity> buildOneToOneQuery(table: Table<T>, relation: Relation<*>): String {
+        return buildString {
+            append("SELECT t2.* FROM ${table._name} t1 ")
+            append("JOIN ${relation.targetTable._name} t2 ON ")
+            append("t2.id = t1.${relation.targetTable._name}_id")
+            append(" WHERE t1.${table.primaryKey.first().name} = ?")
+        }
+    }
+    
+    private fun <T : Entity> buildOneToManyQuery(table: Table<T>, relation: Relation<*>): String {
+        return buildString {
+            append("SELECT t2.* FROM ${table._name} t1 ")
+            append("JOIN ${relation.targetTable._name} t2 ON ")
+            append("t2.${table._name}_id = t1.id")
+            append(" WHERE t1.${table.primaryKey.first().name} = ?")
+        }
+    }
+    
+    private fun <T : Entity> buildManyToOneQuery(table: Table<T>, relation: Relation<*>): String {
+        return buildString {
+            append("SELECT t2.* FROM ${table._name} t1 ")
+            append("JOIN ${relation.targetTable._name} t2 ON ")
+            append("t1.${relation.targetTable._name}_id = t2.id")
+            append(" WHERE t1.${table.primaryKey.first().name} = ?")
+        }
+    }
+    
+    private fun <T : Entity> buildManyToManyQuery(table: Table<T>, relation: Relation<*>): String {
+        val joinTableName = relation.joinTableName ?: "${table._name}_${relation.targetTable._name}"
+        return buildString {
+            append("SELECT t2.* FROM ${table._name} t1 ")
+            append("JOIN $joinTableName j ON t1.id = j.${table._name}_id ")
+            append("JOIN ${relation.targetTable._name} t2 ON j.${relation.targetTable._name}_id = t2.id")
+            append(" WHERE t1.${table.primaryKey.first().name} = ?")
+        }
+    }
+    
+    private fun <T : Entity> saveRelations(table: Table<T>, entity: T) {
+        table.relations.forEach { relation ->
+            val property = entity::class.memberProperties.find { it.name == relation.joinTableName }
+            
+            @Suppress("UNCHECKED_CAST")
+            val relatedEntities = when (val value = property?.call(entity)) {
+                is MutableSet<*> -> value as? MutableSet<Entity>
+                else -> null
+            } ?: return@forEach
+            
+            relatedEntities.forEach { relatedEntity ->
+                @Suppress("UNCHECKED_CAST")
+                persist(relation.targetTable as Table<Entity>, relatedEntity)
+            }
+        }
+    }
+    
+    private fun <T : Entity> cascadeDelete(table: Table<T>, id: Any) {
+        table.relations.filter { it.cascade == CascadeType.DELETE || it.cascade == CascadeType.ALL }
+            .forEach { relation ->
+                val sql = when (relation.type) {
+                    RelationType.ONE_TO_ONE, RelationType.ONE_TO_MANY -> {
+                        buildString {
+                            append("DELETE FROM ${relation.targetTable._name} WHERE ")
+                            append("${table._name}_id = ?")
+                        }
+                    }
+                    
+                    RelationType.MANY_TO_MANY -> {
+                        val joinTableName = relation.joinTableName
+                            ?: "${table._name}_${relation.targetTable._name}"
+                        buildString {
+                            append("DELETE FROM $joinTableName WHERE ")
+                            append("${table._name}_id = ?")
+                        }
+                    }
+                    
+                    RelationType.MANY_TO_ONE -> {
+                        ""
+                    }
+                }
+                
+                if (sql.isNotEmpty()) {
+                    connection.getConnection().prepareStatement(sql).use { statement ->
+                        setParameter(statement, 1, id, table.primaryKey.first().type)
+                        
+                        if (relation.type == RelationType.MANY_TO_MANY &&
+                            (relation.cascade == CascadeType.ALL || relation.cascade == CascadeType.DELETE)
+                        ) {
+                            val orphanedRecordsSql = buildString {
+                                append("DELETE FROM ${relation.targetTable._name} WHERE id NOT IN ")
+                                append("(SELECT ${relation.targetTable._name}_id FROM ${relation.joinTableName})")
+                            }
+                            connection.getConnection().prepareStatement(orphanedRecordsSql).executeUpdate()
+                        }
+                        
+                        statement.executeUpdate()
+                    }
+                }
+            }
+    }
+    
+    private fun <T : Entity> loadRelatedEntities(
+        table: Table<T>,
+        primaryKeyValues: Map<String, Any?>,
+    ): List<T> {
+        if (primaryKeyValues.isEmpty()) return emptyList()
+        
+        val sql = buildString {
+            append("SELECT ")
+            append(table.columns.joinToString(", ") { it.name })
+            append(" FROM ")
+            append(table._name)
+            append(" WHERE ")
+            append(primaryKeyValues.keys.joinToString(" AND ") { "$it = ?" })
+        }
+        
+        return connection.getConnection().prepareStatement(sql).use { statement ->
+            primaryKeyValues.values.forEachIndexed { index, value ->
+                val column = table.columns.find { it.name == primaryKeyValues.keys.elementAt(index) }
+                    ?: throw IllegalStateException("Column not found")
+                setParameter(statement, index + 1, value, column.type)
+            }
+            
+            val resultSet = statement.executeQuery()
+            val entities = mutableListOf<T>()
+            while (resultSet.next()) {
+                entities.add(table.toEntity(resultSet))
+            }
+            entities
+        }
     }
 }
-
-enum class DuplicateKeyStrategy {
-    ERROR,
-    UPDATE,
-    IGNORE
-}
-
-class DuplicateKeyException(message: String, cause: Throwable? = null) : Exception(message, cause)
