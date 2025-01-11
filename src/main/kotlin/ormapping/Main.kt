@@ -201,7 +201,7 @@ fun main() {
     println("\n=== Test 9: Usuwanie danych ===")
     try {
         val deleteBuilder = executor.createDelete()
-            .from("employees")
+            .from(Employees)
             .where("id = 1")
 
         val sqlDelete = deleteBuilder.build()

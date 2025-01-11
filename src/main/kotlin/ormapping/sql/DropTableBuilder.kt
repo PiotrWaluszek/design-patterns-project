@@ -1,50 +1,74 @@
-// Zmodyfikowany DropTableBuilder
 package ormapping.sql
-import ormapping.table.*
-import ormapping.command.*
 
+import ormapping.command.CommandExecutor
+import ormapping.connection.DatabaseConnection
 import ormapping.dialect.SQLDialect
-import ormapping.dialect.SQLiteDialect
+import ormapping.table.Table
 
+/**
+ * Builder, który generuje instrukcję:
+ *   DROP TABLE [IF EXISTS] tableName [CASCADE]
+ */
 class DropTableBuilder(
     private val dialect: SQLDialect,
-    private val table: Table<*>,
+    table: Table<*>,
     private val executor: CommandExecutor
 ) : SQLBuilder {
+
+    private var tableName: String = table._name
+    private var ifExists = false
     private var cascade = false
 
-    fun cascade(): DropTableBuilder {
-        cascade = true
+    /**
+     * Ustawia tabelę na podstawie obiektu `Table<*>`.
+     */
+    fun fromTable(table: Table<*>): DropTableBuilder {
+        this.tableName = table._name
         return this
     }
 
-    override fun build(): String {
-        return buildString {
-            append("DROP TABLE ")
-            append(table._name)
-            if (cascade) append(" CASCADE")
-        }
+    /**
+     * Ustawia tabelę na podstawie nazwy w postaci String.
+     */
+    fun from(tableName: String): DropTableBuilder {
+        this.tableName = tableName
+        return this
     }
 
-    fun execute() {
-        if (cascade && dialect is SQLiteDialect) {
-            cascadeDelete()
-        }
-        executor.executeSQL(this)
+    /**
+     * Dodaje klauzulę IF EXISTS (jeśli dialekt ją wspiera).
+     * Przykład: DROP TABLE IF EXISTS ...
+     */
+    fun ifExists(): DropTableBuilder {
+        this.ifExists = true
+        return this
     }
 
-    private fun cascadeDelete() {
-        for (relation in table.relations) {
-            when (relation.type) {
-                RelationType.ONE_TO_MANY, RelationType.MANY_TO_MANY -> {
-                    val targetTable = relation.targetTable
-                    println("Cascading delete for table: ${targetTable._name}")
-                    executor.delete(targetTable, "1=1") // Usuwamy wszystkie rekordy
-                }
-                else -> {
-                    // Inne typy relacji w zależności od potrzeb
-                }
-            }
+    /**
+     * Dodaje klauzulę CASCADE (jeśli dialekt ją wspiera).
+     * Przykład: DROP TABLE ... CASCADE
+     */
+    fun cascade(): DropTableBuilder {
+        this.cascade = true
+        return this
+    }
+
+    /**
+     * Buduje finalne zapytanie w stylu:
+     *   DROP TABLE [IF EXISTS] tableName [CASCADE]
+     */
+    override fun build(): String = buildString {
+        append("DROP TABLE ")
+        if (ifExists) {
+            // Dialekt np. PostgreSQL wspiera IF EXISTS,
+            // inne bazy mogą to ignorować lub rzucić błąd.
+            append("IF EXISTS ")
+        }
+        append(tableName)
+        if (cascade) {
+            // W PostgreSQL: "CASCADE";
+            // w innych dialektach może to nie działać lub działać inaczej.
+            append(" CASCADE")
         }
     }
 }
