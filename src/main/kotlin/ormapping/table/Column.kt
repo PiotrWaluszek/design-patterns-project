@@ -10,8 +10,11 @@ class Column<T>(
     var primaryKey: Boolean = false,
     var nullable: Boolean = false,
     var unique: Boolean = false,
-    private val length: Int = 0,
-    private val scale: Int = 0,
-    private val precision: Int = 0,
-)
+    val length: Int = 0,
+    val scale: Int = 0,
+    val precision: Int = 0,
+
+) {
+    lateinit var table: Table<*>
+}
 
