@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.0.21"
+    id("org.jetbrains.dokka") version "1.8.20"
 }
 
 group = "com.designpatterns"
@@ -22,4 +23,8 @@ tasks.test {
 }
 kotlin {
     jvmToolchain(21)
+}
+
+tasks.dokkaHtml {
+    outputDirectory.set(buildDir.resolve("dokka"))
 }
