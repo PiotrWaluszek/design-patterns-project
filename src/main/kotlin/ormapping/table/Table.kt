@@ -251,12 +251,6 @@ abstract class Table<T : Entity>(
                 }
                 param.type.classifier is KClass<*> &&
                         (param.type.classifier as KClass<*>).supertypes.any { it.classifier == Entity::class } -> {
-                    related_tables_prefixes.find { prefix ->
-                        relations.any {
-                            it.targetTable._name == prefix &&
-                                    it.targetTable.entityClass == param.type.classifier
-                        }
-                    }
                 }
                 else -> null
             }
