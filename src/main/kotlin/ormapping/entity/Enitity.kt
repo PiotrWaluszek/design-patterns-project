@@ -1,4 +1,7 @@
 package ormapping.entity
 
 
-interface Entity
+import ormapping.table.Table
+
+
+abstract class Entity(val table: Table<*>)

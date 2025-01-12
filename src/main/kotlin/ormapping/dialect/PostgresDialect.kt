@@ -1,6 +1,5 @@
 package ormapping.dialect
 
-// Implementacja dla PostgreSQL
 class PostgresDialect private constructor() : SQLDialect() {
     override fun getInsertIgnoreSyntax() = "INSERT INTO"
     override fun getUpsertSyntax() = "ON CONFLICT"
