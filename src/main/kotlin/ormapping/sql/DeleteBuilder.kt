@@ -4,8 +4,8 @@ import ormapping.table.Column
 import ormapping.table.Table
 
 /**
- * Builder, który generuje instrukcję DELETE FROM ...
- * z opcjonalnym WHERE oraz (w pewnych dialektach) CASCADE.
+ * Builder that generates a `DELETE FROM` SQL statement with optional
+ * `WHERE` clauses and cascade options (depending on SQL dialect).
  */
 class DeleteBuilder : SQLBuilder {
     private var tableName: String = ""
@@ -13,8 +13,10 @@ class DeleteBuilder : SQLBuilder {
     private var cascade = false
 
     /**
-     * Ustawia tabelę (na podstawie obiektu `Table<*>`),
-     * z której chcemy usuwać rekordy.
+     * Sets the target table for deletion using a [Table] object.
+     *
+     * @param table The table definition from which records will be deleted.
+     * @return The current [DeleteBuilder] instance for chaining.
      */
     fun from(table: Table<*>): DeleteBuilder {
         this.tableName = table._name
@@ -22,8 +24,10 @@ class DeleteBuilder : SQLBuilder {
     }
 
     /**
-     * Ustawia tabelę (za pomocą nazwy w postaci String),
-     * z której chcemy usuwać rekordy.
+     * Sets the target table for deletion using its name.
+     *
+     * @param tableName The name of the table from which records will be deleted.
+     * @return The current [DeleteBuilder] instance for chaining.
      */
     fun from(tableName: String): DeleteBuilder {
         this.tableName = tableName
@@ -31,8 +35,11 @@ class DeleteBuilder : SQLBuilder {
     }
 
     /**
-     * Dodaje warunek do klauzuli WHERE (jako String).
-     * Można dodać wiele warunków, będą łączone klauzulą AND.
+     * Adds a condition to the `WHERE` clause.
+     * Multiple conditions will be combined with `AND`.
+     *
+     * @param condition The condition to add.
+     * @return The current [DeleteBuilder] instance for chaining.
      */
     fun where(condition: String): DeleteBuilder {
         conditions.add(condition)
@@ -40,11 +47,16 @@ class DeleteBuilder : SQLBuilder {
     }
 
     /**
-     * Przeciążona metoda `where`, pozwala budować
-     * proste warunki typu `id = 5` na podstawie kolumny z Table.
+     * Overloaded method to add a simple condition to the `WHERE` clause.
+     * Constructs conditions like `id = 5` based on column, operator, and value.
      *
-     * Przykład użycia:
-     *  .where(Employees.id, "=", 1)
+     * Example usage:
+     * `.where(Employees.id, "=", 1)`
+     *
+     * @param column The column involved in the condition.
+     * @param operator The operator (e.g., `=`, `<`, `>`).
+     * @param value The value to compare against.
+     * @return The current [DeleteBuilder] instance for chaining.
      */
     fun where(column: Column<*>, operator: String, value: Any?): DeleteBuilder {
         val condition = buildString {
@@ -52,7 +64,6 @@ class DeleteBuilder : SQLBuilder {
             append(" ")
             append(operator)
             append(" ")
-            // Jeżeli wartość jest Stringiem, dodaj cudzysłowy
             if (value is String) {
                 append("'$value'")
             } else {
@@ -64,10 +75,12 @@ class DeleteBuilder : SQLBuilder {
     }
 
     /**
-     * Ustawia kasowanie kaskadowe (zależne od dialektu SQL).
-     * W standardzie SQL CASCADE pojawia się głównie przy DROP TABLE
-     * albo przy usuwaniu rekordów, do których istnieją klucze obce
-     * zdefiniowane z CASCADE DELETE. Traktuj opcjonalnie.
+     * Enables cascading delete (depending on SQL dialect support).
+     *
+     * Note: Cascade delete typically applies to scenarios where foreign key
+     * constraints are defined with `ON DELETE CASCADE`.
+     *
+     * @return The current [DeleteBuilder] instance for chaining.
      */
     fun cascade(): DeleteBuilder {
         cascade = true
@@ -75,8 +88,12 @@ class DeleteBuilder : SQLBuilder {
     }
 
     /**
-     * Składa finalną komendę SQL, np:
-     *  DELETE FROM employees WHERE id = 1 [CASCADE]
+     * Builds the final SQL `DELETE` command.
+     *
+     * Example output:
+     * `DELETE FROM employees WHERE id = 1 [CASCADE]`
+     *
+     * @return The SQL `DELETE` statement as a string.
      */
     override fun build(): String = buildString {
         append("DELETE FROM $tableName")

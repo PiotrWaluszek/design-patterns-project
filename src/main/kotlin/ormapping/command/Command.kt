@@ -1,16 +1,17 @@
-// Command.kt
 package ormapping.command
 
 import ormapping.connection.DatabaseConnection
 
 /**
- * Bazowa klasa abstrakcyjna dla wzorca Command
- * Wszystkie konkretne komendy muszą dziedziczyć po tej klasie
+ * Abstract base class for the Command pattern.
+ * All concrete commands must inherit from this class.
  */
 abstract class Command {
+
     /**
-     * Metoda wykonująca komendę
-     * @param connection Połączenie z bazą danych
+     * Executes the command using the provided database connection.
+     *
+     * @param connection The database connection to be used for executing the command.
      */
     abstract fun execute(connection: DatabaseConnection)
 }

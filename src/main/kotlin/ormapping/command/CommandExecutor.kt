@@ -20,24 +20,52 @@ import kotlin.reflect.KMutableProperty
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
 
-
+/**
+ * Executes database commands and manages database operations with logging capabilities.
+ *
+ * @property connection The database connection to use for executing commands
+ * @property logger The logger instance for recording operations
+ * @property logDest The destination for log entries
+ */
 class CommandExecutor(
     private val connection: DatabaseConnection,
     private val logger: MultiDestinationLogger,
     private val logDest: String,
 ) {
-    
+
+    /**
+     * Creates a new SELECT query builder.
+     * @return A new SelectBuilder instance
+     */
     fun createSelect(): SelectBuilder = SelectBuilder()
-    
+
+    /**
+     * Creates a new DELETE query builder.
+     * @return A new DeleteBuilder instance
+     */
     fun createDelete(): DeleteBuilder = DeleteBuilder()
-    
+
+    /**
+     * Creates a new CREATE TABLE query builder.
+     * @return A new CreateTableBuilder instance
+     */
     fun createTable(): CreateTableBuilder = CreateTableBuilder()
-    
+
+    /**
+     * Creates a DROP TABLE query builder for the specified table.
+     * @param table The table to be dropped
+     * @return A new DropTableBuilder instance
+     */
     fun dropTable(table: Table<*>): DropTableBuilder {
         return DropTableBuilder(connection.getDialect(), table, this)
     }
-    
-    // Metoda wykonująca zbudowane zapytanie
+
+    /**
+     * Executes an SQL query built by the provided builder.
+     * @param builder The SQL builder containing the query to execute
+     * @return The appropriate SQLCommand instance based on the builder type
+     * @throws IllegalArgumentException if the builder type is unknown
+     */
     fun executeSQL(builder: SQLBuilder): SQLCommand {
         val sql = builder.build()
         logger.log(logDest, "Executing SQL:")
@@ -50,11 +78,20 @@ class CommandExecutor(
             else -> throw IllegalArgumentException("Unknown builder type")
         }.also { it.execute(connection) }
     }
-    
+
+    /**
+     * Finds an entity by its primary key values.
+     *
+     * @param table The table to search in
+     * @param values The primary key column values to search for
+     * @return The found entity or null if not found
+     * @throws IllegalArgumentException if the provided columns don't match the table's primary keys
+     * @throws IllegalStateException if the entity structure is invalid or contains unsupported types
+     */
     fun <T : Entity> find(table: Table<T>, vararg values: ColumnValue<*>): T? {
         val primaryKeyColumns = table.primaryKey.toSet()
         val providedPrimaryKeys = values.map { it.column }.toSet()
-        
+
         if (primaryKeyColumns != providedPrimaryKeys) {
             throw IllegalArgumentException(
                 "Provided columns don't match table's primary keys exactly.\n" +
@@ -62,7 +99,7 @@ class CommandExecutor(
                         "Got: ${providedPrimaryKeys.map { it.name }}"
             )
         }
-        
+
         val sql = buildString {
             append("SELECT ")
             append(table.columns.joinToString(", ") { it.name })
@@ -77,16 +114,14 @@ class CommandExecutor(
             values.forEachIndexed { index, columnValue ->
                 setParameter(statement, index + 1, columnValue.value, columnValue.column.type)
             }
-            
+
             val resultSet = statement.executeQuery()
             if (resultSet.next()) {
-                // Tworzymy główną encję z pominięciem kolekcji (będą nullami)
                 val constructor = table.entityClass.primaryConstructor
                     ?: throw IllegalStateException("Entity must have a primary constructor")
-                
+
                 val parameters = constructor.parameters.associateWith { param ->
                     when {
-                        // Dla kolekcji zwracamy PUSTĄ KOLEKCJĘ odpowiedniego typu
                         param.type.classifier is KClass<*> &&
                                 Collection::class.java.isAssignableFrom((param.type.classifier as KClass<*>).java) -> {
                             when {
@@ -95,7 +130,6 @@ class CommandExecutor(
                                 else -> throw IllegalStateException("Unsupported collection type ${param.type}")
                             }
                         }
-                        // Dla zwykłych kolumn pobieramy wartości
                         else -> {
                             val column = table.columns.find { it.name == param.name }
                             if (column != null) {
@@ -108,33 +142,34 @@ class CommandExecutor(
                                     else -> throw IllegalStateException("Unsupported type ${column.type} for column ${column.name}")
                                 }
                             } else {
-                                // Jeśli nie ma kolumny a parametr jest opcjonalny, używamy null
                                 if (param.isOptional) null
                                 else throw IllegalStateException("No column found for required parameter ${param.name}")
                             }
                         }
                     }
                 }
-                
-                // Tworzymy encję
+
                 val entity = constructor.callBy(parameters)
-                
-                // Ładujemy relacje
                 loadRelations(table, entity)
-                
                 entity
             } else {
                 null
             }
         }
     }
-    
+
+    /**
+     * Persists one or more entities to the database.
+     *
+     * @param table The table to persist the entities to
+     * @param entities The entities to persist
+     */
     fun <T : Entity> persist(
         table: Table<T>,
         vararg entities: T,
     ) {
         if (entities.isEmpty()) return
-        
+
         val sql = buildString {
             append("INSERT INTO ")
             append(table._name)
@@ -149,7 +184,6 @@ class CommandExecutor(
         connection.getConnection().prepareStatement(sql).use { statement ->
             entities.forEach { entity ->
                 val values = table.fromEntity(entity)
-                println(values)
                 table.columns.forEachIndexed { index, column ->
                     setParameter(statement, index + 1, values[column], column.type)
                 }
@@ -159,12 +193,19 @@ class CommandExecutor(
             statement.executeBatch()
         }
     }
-    
+
+    /**
+     * Deletes an entity from the database based on primary key values.
+     *
+     * @param table The table to delete from
+     * @param values The primary key values identifying the record to delete
+     * @return true if the record was deleted, false otherwise
+     * @throws IllegalArgumentException if the provided columns don't match the table's primary keys
+     */
     fun <T : Entity> delete(table: Table<T>, vararg values: ColumnValue<*>): Boolean {
-        // Sprawdzenie czy przekazane kolumny pokrywają wszystkie klucze główne
         val primaryKeyColumns = table.primaryKey.toSet()
         val providedPrimaryKeys = values.map { it.column }.toSet()
-        
+
         if (primaryKeyColumns != providedPrimaryKeys) {
             throw IllegalArgumentException(
                 "Provided columns don't match table's primary keys exactly.\n" +
@@ -172,20 +213,17 @@ class CommandExecutor(
                         "Got: ${providedPrimaryKeys.map { it.name }}"
             )
         }
-        
+
         val sql = buildString {
             append("DELETE FROM ")
             append(table._name)
             append(" WHERE ")
             append(values.joinToString(" AND ") { "${it.column.name} = ?" })
         }
-        
-        // Zakładam, że cascadeDelete powinno otrzymać wszystkie wartości kluczy
-        // zamiast pojedynczej wartości id
-        
+
         cascadeDelete(table, values)
         orphan(table, values)
-        
+
         logger.log(logDest, "Executing Delete")
         logger.log(logDest, sql)
         return connection.getConnection().prepareStatement(sql).use { statement ->
@@ -195,22 +233,28 @@ class CommandExecutor(
             statement.executeUpdate() > 0
         }
     }
-    
+
+    /**
+     * Deletes orphaned records from a table based on foreign key relationships.
+     * An orphaned record is one where the foreign key reference is NULL.
+     *
+     * @param table The table containing potential orphaned records
+     * @param relatedTable The table that should be referenced by the foreign key
+     * @return The number of deleted orphaned records
+     * @throws IllegalArgumentException if no foreign key relationship exists between the tables
+     */
     fun <T : Entity, R : Entity> slayOrphans(table: Table<T>, relatedTable: Table<R>): Int {
-        // Znajdujemy odpowiedni klucz obcy pomiędzy tabelami
         val relevantForeignKey = table.foreignKeys.find { fk ->
             fk.targetTable == relatedTable._name
         } ?: throw IllegalArgumentException("No foreign key found from ${table._name} to ${relatedTable._name}")
         
         val orphanedRecords = buildString {
             append("DELETE FROM ${table._name} WHERE ")
-            // Bierzemy tylko kolumny związane z konkretnym kluczem obcym
             val foreignKeyColumns = table.columns.filter { column ->
                 relevantForeignKey.targetColumns.any { targetCol ->
                     column.name == "${relatedTable._name}_$targetCol"
                 }
             }
-            // Sprawdzamy czy te konkretne kolumny są NULL
             append(foreignKeyColumns.joinToString(" AND ") {
                 "${it.name} IS NULL"
             })
@@ -222,8 +266,16 @@ class CommandExecutor(
             statement.executeUpdate()
         }
     }
-    
-    // I podobnie dla findOrphans:
+
+    /**
+     * Finds all orphaned records in a table based on foreign key relationships.
+     * An orphaned record is one where the foreign key reference is NULL.
+     *
+     * @param table The table to search for orphaned records
+     * @param relatedTable The table that should be referenced by the foreign key
+     * @return A list of orphaned entities
+     * @throws IllegalArgumentException if no foreign key relationship exists between the tables
+     */
     fun <T : Entity, R : Entity> findOrphans(table: Table<T>, relatedTable: Table<R>): List<T> {
         val relevantForeignKey = table.foreignKeys.find { fk ->
             fk.targetTable == relatedTable._name
@@ -251,7 +303,15 @@ class CommandExecutor(
             orphans
         }
     }
-    
+
+    /**
+     * Handles orphaned records during delete operations based on cascade settings.
+     * For ONE_TO_ONE and ONE_TO_MANY relationships, sets foreign key references to NULL.
+     * For MANY_TO_MANY relationships, deletes the corresponding join table records.
+     *
+     * @param table The table containing the record being deleted
+     * @param values The primary key values of the record being deleted
+     */
     private fun <T : Entity> orphan(table: Table<T>, values: Array<out ColumnValue<*>>) {
         table.relations.filter { it.cascade == CascadeType.NONE || it.cascade == CascadeType.UPDATE }
             .forEach { relation ->
@@ -259,12 +319,10 @@ class CommandExecutor(
                     RelationType.ONE_TO_ONE, RelationType.ONE_TO_MANY -> {
                         buildString {
                             append("UPDATE ${relation.targetTable._name} SET ")
-                            // Ustawiamy wszystkie kolumny klucza obcego na NULL
                             append(values.joinToString(", ") {
                                 "${table._name}_${it.column.name} = NULL"
                             })
                             append(" WHERE ")
-                            // Warunek WHERE dla aktualnych wartości
                             append(values.joinToString(" AND ") {
                                 "${table._name}_${it.column.name} = ?"
                             })
@@ -298,20 +356,29 @@ class CommandExecutor(
                 }
             }
     }
-    
+
+    /**
+     * Updates an entity in the database with new values while maintaining referential integrity.
+     * Handles cascade updates and orphaned records if primary keys are modified.
+     *
+     * @param table The table containing the entity to update
+     * @param entity The entity to update
+     * @param newValues The new values to set for specific columns
+     * @return The updated entity instance
+     * @throws IllegalArgumentException if the table has no primary keys defined
+     * @throws IllegalStateException if the entity structure is invalid
+     */
     fun <T : Entity> update(table: Table<T>, entity: T, vararg newValues: ColumnValue<*>): T {
         val columnValues = table.fromEntity(entity)
         val primaryKeyColumns = table.primaryKey
         if (primaryKeyColumns.isEmpty()) {
             throw IllegalArgumentException("Table must have primary keys defined")
         }
-        
-        // Sprawdzamy czy któreś z nowych wartości dotyczą kluczy głównych
+
         val updatedPrimaryKeys = newValues.filter { newValue ->
             primaryKeyColumns.contains(newValue.column)
         }
-        
-        // Przygotowujemy SQL update
+
         val sql = buildString {
             append("UPDATE ")
             append(table._name)
@@ -324,24 +391,20 @@ class CommandExecutor(
         logger.log(logDest, sql)
         val updateSuccessful = connection.getConnection().prepareStatement(sql).use { statement ->
             var parameterIndex = 1
-            
-            // SET values - używamy nowych wartości
+
             newValues.forEach { columnValue ->
                 setParameter(statement, parameterIndex++, columnValue.value, columnValue.column.type)
             }
-            
-            // WHERE values - używamy oryginalnych wartości z entity
+
             primaryKeyColumns.forEach { column ->
                 setParameter(statement, parameterIndex++, columnValues[column], column.type)
             }
             
             statement.executeUpdate() > 0
         }
-        
-        // Jeśli update się powiódł i modyfikujemy klucze główne
+
         if (updateSuccessful && updatedPrimaryKeys.isNotEmpty()) {
-            
-            // Najpierw obsługujemy relacje z CASCADE ALL lub UPDATE
+
             table.relations
                 .filter { it.cascade == CascadeType.ALL || it.cascade == CascadeType.UPDATE }
                 .forEach { relation ->
@@ -351,8 +414,7 @@ class CommandExecutor(
                         *updatedPrimaryKeys.toTypedArray()
                     )
                 }
-            
-            // Następnie obsługujemy relacje z NONE lub DELETE
+
             table.relations
                 .filter { it.cascade == CascadeType.NONE || it.cascade == CascadeType.DELETE }
                 .forEach { relation ->
@@ -367,8 +429,7 @@ class CommandExecutor(
             ?: throw IllegalStateException("Entity must have a primary constructor")
         
         val originalValues = table.fromEntity(entity)
-        
-        // Nadpisujemy oryginalne wartości nowymi
+
         val updatedValues = originalValues.toMutableMap()
         newValues.forEach { newValue ->
             updatedValues[newValue.column] = newValue.value
@@ -376,18 +437,15 @@ class CommandExecutor(
         
         val parameters = constructor.parameters.associateWith { param ->
             when {
-                // Jeśli parametr jest kolekcją (Set, List, etc.), zwracamy null
                 param.type.classifier is KClass<*> &&
                         Collection::class.java.isAssignableFrom((param.type.classifier as KClass<*>).java) -> {
                     null
                 }
-                // Dla zwykłych pól szukamy wartości w kolumnach
                 else -> {
                     val column = table.columns.find { it.name == param.name }
                     if (column != null) {
                         updatedValues[column]
                     } else {
-                        // Jeśli nie znaleźliśmy kolumny, a parametr ma wartość domyślną, pozwalamy konstruktorowi użyć defaultowej
                         if (param.isOptional) null else throw IllegalStateException("No column found for required parameter ${param.name}")
                     }
                 }
@@ -396,7 +454,15 @@ class CommandExecutor(
         
         return constructor.callBy(parameters)
     }
-    
+
+    /**
+     * Performs cascade updates on related tables when primary keys are modified.
+     * Updates foreign key references in related tables based on cascade settings.
+     *
+     * @param table The table containing the updated entity
+     * @param entity The entity being updated
+     * @param updatedKeys The primary key columns that have been modified
+     */
     private fun <T : Entity> cascadeUpdate(table: Table<T>, entity: T, vararg updatedKeys: ColumnValue<*>) {
         table.relations
             .filter { it.cascade == CascadeType.ALL || it.cascade == CascadeType.UPDATE }
@@ -405,12 +471,10 @@ class CommandExecutor(
                     RelationType.ONE_TO_ONE, RelationType.ONE_TO_MANY -> {
                         buildString {
                             append("UPDATE ${relation.targetTable._name} SET ")
-                            // Dla każdego zmienionego klucza, aktualizujemy odpowiadającą mu kolumnę w tabeli docelowej
                             append(updatedKeys.joinToString(", ") {
                                 "${table._name}_${it.column.name} = ?"
                             })
                             append(" WHERE ")
-                            // Znajdujemy rekordy z starymi wartościami kluczy
                             append(updatedKeys.joinToString(" AND ") {
                                 "${table._name}_${it.column.name} = ?"
                             })
@@ -439,11 +503,9 @@ class CommandExecutor(
                 if (sql.isNotEmpty()) {
                     connection.getConnection().prepareStatement(sql).use { statement ->
                         var paramIndex = 1
-                        // Nowe wartości
                         updatedKeys.forEach {
                             setParameter(statement, paramIndex++, it.value, it.column.type)
                         }
-                        // Stare wartości
                         updatedKeys.forEach {
                             val oldValue = table.fromEntity(entity)[it.column]
                             setParameter(statement, paramIndex++, oldValue, it.column.type)
@@ -453,17 +515,23 @@ class CommandExecutor(
                 }
             }
     }
-    
+
+    /**
+     * Handles orphaned records during update operations for non-cascading relationships.
+     * Sets foreign key references to NULL or removes join table entries.
+     *
+     * @param table The table containing the updated entity
+     * @param entity The entity being updated
+     * @throws IllegalArgumentException if required foreign key relationships are not found
+     */
     private fun <T : Entity> orphanUpdate(table: Table<T>, entity: T) {
         table.relations.filter { it.cascade == CascadeType.NONE || it.cascade == CascadeType.DELETE }
             .forEach { relation ->
-                // Szukamy klucza obcego w tabeli DOCELOWEJ, który wskazuje na naszą tabelę
                 val relevantForeignKey = relation.targetTable.foreignKeys.find { fk ->
                     fk.targetTable == table._name
                 }
                     ?: throw IllegalArgumentException("No foreign key found from ${relation.targetTable._name} to ${table._name}")
-                
-                // Znajdujemy kolumny klucza obcego w tabeli DOCELOWEJ
+
                 val foreignKeyColumns = relation.targetTable.columns.filter { column ->
                     relevantForeignKey.targetColumns.any { targetCol ->
                         column.name == "${table._name}_$targetCol"
@@ -503,10 +571,7 @@ class CommandExecutor(
                 logger.log(logDest, sql)
                 if (sql.isNotEmpty()) {
                     connection.getConnection().prepareStatement(sql).use { statement ->
-                        // Pobieramy wartości kluczy głównych z entity
                         val entityValues = table.fromEntity(entity)
-                        // Dla każdej kolumny klucza obcego w tabeli docelowej
-                        // ustawiamy odpowiadającą jej wartość z klucza głównego naszej encji
                         foreignKeyColumns.forEachIndexed { index, column ->
                             val primaryKeyColumn = table.primaryKey.find {
                                 column.name == "${table._name}_${it.name}"
@@ -524,13 +589,28 @@ class CommandExecutor(
                 }
             }
     }
-    
+
+    /**
+     * Persists a collection of entities to the database.
+     *
+     * @param table The table to persist the entities to
+     * @param entities The collection of entities to persist
+     */
     inline fun <reified T : Entity> persistAll(
         table: Table<T>, entities: Collection<T>,
     ) {
         persist(table, *entities.toTypedArray())
     }
-    
+
+    /**
+     * Sets a parameter value in a PreparedStatement with appropriate type conversion.
+     *
+     * @param statement The PreparedStatement to set the parameter in
+     * @param index The parameter index
+     * @param value The value to set
+     * @param type The Kotlin type of the parameter
+     * @throws IllegalArgumentException if the type is not supported
+     */
     private fun setParameter(statement: java.sql.PreparedStatement, index: Int, value: Any?, type: KClass<*>) {
         when (type) {
             Int::class -> statement.setInt(index, value as Int)
@@ -541,7 +621,14 @@ class CommandExecutor(
             else -> throw IllegalArgumentException("Unsupported type: $type")
         }
     }
-    
+
+    /**
+     * Loads related entities for all defined relationships of an entity.
+     * Handles different relationship types (ONE_TO_ONE, ONE_TO_MANY, etc.).
+     *
+     * @param table The table containing the entity
+     * @param entity The entity to load relations for
+     */
     private fun <T : Entity> loadRelations(table: Table<T>, entity: T) {
         table.relations.forEach { relation ->
             val sql = when (relation.type) {
@@ -581,8 +668,7 @@ class CommandExecutor(
                             property?.let { prop ->
                                 val currentValue = prop.call(entity) as? Entity
                                 if (currentValue == null) {
-                                    
-                                    // Jeśli wartość jest null, ustawiamy ją na pierwszą encję z listy powiązań
+
                                     (prop as? KMutableProperty<*>)?.setter?.call(entity, relatedEntities.first())
                                 }
                             }
@@ -603,23 +689,35 @@ class CommandExecutor(
             }
         }
     }
-    
+
+    /**
+     * Builds a SQL query for ONE_TO_ONE relationships.
+     *
+     * @param table The source table
+     * @param relation The relationship definition
+     * @return The SQL query string
+     */
     private fun <T : Entity> buildOneToOneQuery(table: Table<T>, relation: Relation<*>): String {
         return buildString {
             append("SELECT t2.* FROM ${table._name} t1 ")
             append("JOIN ${relation.targetTable._name} t2 ON ")
-            // Łączymy po wszystkich kolumnach klucza obcego
             append(table.primaryKey.joinToString(" AND ") { pk ->
                 "t2.${table._name}_${pk.name} = t1.${pk.name}"
             })
-            // WHERE po wszystkich kolumnach klucza głównego
             append(" WHERE ")
             append(table.primaryKey.joinToString(" AND ") {
                 "t1.${it.name} = ?"
             })
         }
     }
-    
+
+    /**
+     * Builds a SQL query for ONE_TO_MANY relationships.
+     *
+     * @param table The source table
+     * @param relation The relationship definition
+     * @return The SQL query string
+     */
     private fun <T : Entity> buildOneToManyQuery(table: Table<T>, relation: Relation<*>): String {
         return buildString {
             append("SELECT t2.* FROM ${table._name} t1 ")
@@ -633,7 +731,14 @@ class CommandExecutor(
             })
         }
     }
-    
+
+    /**
+     * Builds a SQL query for MANY_TO_ONE relationships.
+     *
+     * @param table The source table
+     * @param relation The relationship definition
+     * @return The SQL query string
+     */
     private fun <T : Entity> buildManyToOneQuery(table: Table<T>, relation: Relation<*>): String {
         return buildString {
             append("SELECT t2.* FROM ${table._name} t1 ")
@@ -647,18 +752,23 @@ class CommandExecutor(
             })
         }
     }
-    
+
+    /**
+     * Builds a SQL query for MANY_TO_MANY relationships using a join table.
+     *
+     * @param table The source table
+     * @param relation The relationship definition
+     * @return The SQL query string
+     */
     private fun <T : Entity> buildManyToManyQuery(table: Table<T>, relation: Relation<*>): String {
         val joinTableName = relation.joinTableName ?: "${table._name}_${relation.targetTable._name}"
         return buildString {
             append("SELECT t2.* FROM ${table._name} t1 ")
             append("JOIN $joinTableName j ON ")
-            // Łączenie z tabelą łączącą
             append(table.primaryKey.joinToString(" AND ") { pk ->
                 "t1.${pk.name} = j.${table._name}_${pk.name}"
             })
             append(" JOIN ${relation.targetTable._name} t2 ON ")
-            // Łączenie tabeli łączącej z tabelą docelową
             append(relation.targetTable.primaryKey.joinToString(" AND ") { pk ->
                 "j.${relation.targetTable._name}_${pk.name} = t2.${pk.name}"
             })
@@ -668,21 +778,25 @@ class CommandExecutor(
             })
         }
     }
-    
+
+    /**
+     * Performs cascade deletes on related tables based on cascade settings.
+     * Handles different relationship types and maintains referential integrity.
+     *
+     * @param table The table containing the deleted entity
+     * @param values The primary key values of the deleted entity
+     */
     private fun <T : Entity> saveRelations(table: Table<T>, entity: T) {
         table.relations.forEach { relation ->
-            // Znajdujemy property odpowiadające powiązanej tabeli
             val property = entity::class.memberProperties
                 .find { it.name == relation.targetTable._name.lowercase() }
                 ?.call(entity) ?: return@forEach
             
             when (property) {
-                // Dla relacji jeden-do-jeden lub wiele-do-jednego
                 is Entity -> {
                     @Suppress("UNCHECKED_CAST")
                     persist(relation.targetTable as Table<Entity>, property)
-                    
-                    // Ustawiamy relację zwrotną
+
                     val backProperty = property::class.memberProperties
                         .find { it.name == table._name.lowercase() }
                     if (backProperty != null) {
@@ -691,14 +805,12 @@ class CommandExecutor(
                         setter?.call(property, entity)
                     }
                 }
-                // Dla relacji jeden-do-wielu lub wiele-do-wielu
                 is Collection<*> -> {
                     @Suppress("UNCHECKED_CAST")
                     property.forEach { relatedEntity ->
                         if (relatedEntity is Entity) {
                             persist(relation.targetTable as Table<Entity>, relatedEntity)
-                            
-                            // Ustawiamy relację zwrotną
+
                             val backProperty = relatedEntity::class.memberProperties
                                 .find { it.name == table._name.lowercase() }
                             if (backProperty != null) {
@@ -712,7 +824,15 @@ class CommandExecutor(
             }
         }
     }
-    
+
+    /**
+     * Loads related entities based on primary key values.
+     *
+     * @param table The table to load entities from
+     * @param primaryKeyValues Map of primary key column names to their values
+     * @return List of loaded entities
+     * @throws IllegalStateException if a referenced column is not found
+     */
     private fun <T : Entity> cascadeDelete(table: Table<T>, values: Array<out ColumnValue<*>>) {
         table.relations.filter { it.cascade == CascadeType.DELETE || it.cascade == CascadeType.ALL }
             .forEach { relation ->
@@ -764,7 +884,22 @@ class CommandExecutor(
                 }
             }
     }
-    
+
+    /**
+     * Loads related entities from the database based on primary key values.
+     * This method constructs and executes a SELECT query to fetch entities matching the provided primary key values.
+     *
+     * @param table The table to load entities from
+     * @param primaryKeyValues A map of column names to their values for identifying the related entities
+     * @return A list of entities matching the primary key values, or an empty list if no matches or no values provided
+     * @throws IllegalStateException if a referenced column is not found in the table
+     *
+     * Example usage:
+     * ```
+     * val pkValues = mapOf("id" to 1, "type" to "user")
+     * val relatedEntities = loadRelatedEntities(UserTable, pkValues)
+     * ```
+     */
     private fun <T : Entity> loadRelatedEntities(
         table: Table<T>,
         primaryKeyValues: Map<String, Any?>,
