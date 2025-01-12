@@ -1,13 +1,14 @@
+import ormapping.Employees
 import ormapping.command.CommandExecutor
 import ormapping.connection.DatabaseConfig
 import ormapping.connection.DatabaseConnection
 import ormapping.connection.SQLiteConnection
 import ormapping.entity.Entity
 import ormapping.table.*
+import ormapping.sql.CreateTableBuilder
 import java.time.LocalDate
 
 data class Course(
-    val departmentCode: String,
     val courseNumber: Int,
     val name: String,
     val credits: Int,
@@ -42,61 +43,66 @@ data class Professor(
 ) : Entity
 
 class CourseTable : Table<Course>("course", Course::class) {
-    val departmentCode = varchar("department_code", 10)
+
     val courseNumber = integer("course_number")
-    
+
     val name = varchar("name", 100)
     val credits = integer("credits")
-    
-    init {
-        departmentCode.primaryKey()
-        courseNumber.primaryKey()
-        
-        manyToOne(DepartmentTable(), CascadeType.NONE)
-        
-        manyToMany(CourseTable(), CascadeType.NONE)
-        
-        manyToMany(StudentTable(), CascadeType.NONE)
-    }
+
+
 }
 
 class DepartmentTable : Table<Department>("department", Department::class) {
     val code = varchar("code", 10).primaryKey()
     val name = varchar("name", 100)
     val building = varchar("building", 50)
-    
-    init {
-        oneToMany(CourseTable(), CascadeType.ALL)
-        
-        oneToMany(ProfessorTable(), CascadeType.NONE)
-    }
+
 }
 
 class StudentTable : Table<Student>("student", Student::class) {
     val id = integer("id").primaryKey()
     val name = varchar("name", 100)
     val enrollmentDate = date("enrollment_date")
-    
-    init {
-        manyToOne(DepartmentTable(), CascadeType.NONE)
-        
-        manyToMany(CourseTable(), CascadeType.NONE)
-        
-        manyToOne(ProfessorTable(), CascadeType.NONE)
-    }
+
 }
 
 class ProfessorTable : Table<Professor>("professor", Professor::class) {
     val id = integer("id").primaryKey()
     val name = varchar("name", 100)
-    
-    init {
-        manyToOne(DepartmentTable(), CascadeType.NONE)
-        
-        oneToMany(StudentTable(), CascadeType.NONE)
-        
-        manyToMany(CourseTable(), CascadeType.NONE)
-    }
+
+}
+
+fun setupAllRelations(
+    departmentTable: DepartmentTable,
+    courseTable: CourseTable,
+    studentTable: StudentTable,
+    professorTable: ProfessorTable
+) {
+    // Department ↔ Course
+    departmentTable.oneToMany(courseTable, CascadeType.ALL)
+    courseTable.manyToOne(departmentTable, CascadeType.NONE)
+
+    // Department ↔ Professor
+    departmentTable.oneToMany(professorTable, CascadeType.NONE)
+    professorTable.manyToOne(departmentTable, CascadeType.NONE)
+
+    // Course ↔ Course (prerequisites)
+    courseTable.manyToMany(courseTable, CascadeType.NONE)
+
+    // Course ↔ Student
+    courseTable.manyToMany(studentTable, CascadeType.NONE)
+    studentTable.manyToMany(courseTable, CascadeType.NONE)
+
+    // Student ↔ Department
+    studentTable.manyToOne(departmentTable, CascadeType.NONE)
+
+    // Student ↔ Professor
+    studentTable.manyToOne(professorTable, CascadeType.NONE)
+    professorTable.oneToMany(studentTable, CascadeType.NONE)
+
+    // Professor ↔ Course
+    professorTable.manyToMany(courseTable, CascadeType.NONE)
+    courseTable.manyToMany(professorTable, CascadeType.NONE)
 }
 
 fun main() {
@@ -105,45 +111,62 @@ fun main() {
     )
     val connection = SQLiteConnection.create(config)
     val executor = CommandExecutor(connection)
-    
+
+
+
     val departmentTable = DepartmentTable()
     val courseTable = CourseTable()
     val studentTable = StudentTable()
     val professorTable = ProfessorTable()
-    
+
+    setupAllRelations(departmentTable, courseTable, studentTable, professorTable)
+
+    println("\n=== Creating tables ===")
+    try {
+        listOf(departmentTable, courseTable, studentTable, professorTable).forEach { tbl ->
+            val createSQL = CreateTableBuilder().fromTable(tbl)
+            println("SQL for table [${tbl._name}]:\n${createSQL.build()}\n")
+            executor.executeSQL(createSQL)
+
+        }
+        println("All tables created successfully.\n")
+    } catch (e: Exception) {
+        println("Error creating tables: ${e.message}")
+    }
+
     val csDepartment = Department(
         code = "CS",
         name = "Computer Science",
         building = "Tech Building"
     )
     executor.persist(departmentTable, csDepartment)
-    
+
     val programmingCourse = Course(
-        departmentCode = "CS",
+        //departmentCode = "CS",
         courseNumber = 101,
         name = "Introduction to Programming",
         credits = 3,
         department = csDepartment
     )
-    
+
     val databaseCourse = Course(
-        departmentCode = "CS",
+        //departmentCode = "CS",
         courseNumber = 301,
         name = "Database Systems",
         credits = 4,
         department = csDepartment,
         prerequisites = mutableSetOf(programmingCourse)
     )
-    
+
     executor.persist(courseTable, programmingCourse, databaseCourse)
-    
+
     val professor = Professor(
         id = 1,
         name = "Dr. Smith",
         department = csDepartment
     )
     executor.persist(professorTable, professor)
-    
+
     val student = Student(
         id = 1,
         name = "John Doe",
@@ -152,20 +175,22 @@ fun main() {
         academicAdvisor = professor
     )
     executor.persist(studentTable, student)
-    
+
     student.enrolledCourses.add(programmingCourse)
     executor.update(studentTable, student)
-    
+
     val foundCourse = executor.find(
         courseTable, mapOf(
             "department_code" to "CS",
             "course_number" to 101
         )
     )
-    
+
     println("Found course: ${foundCourse?.name}")
     println("Department: ${foundCourse?.department?.name}")
     println("Enrolled students: ${foundCourse?.enrolledStudents?.map { it.name }}")
-    
+
+
+
     executor.delete(departmentTable, "CS")
 }

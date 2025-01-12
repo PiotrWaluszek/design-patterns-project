@@ -1,11 +1,13 @@
 package ormapping
 
-import ormapping.command.CommandExecutor
+import ormapping.command.*
 import ormapping.connection.DatabaseConfig
 import ormapping.connection.SQLiteConnection
 import ormapping.entity.Entity
 import ormapping.table.Table
+import ormapping.sql.*
 
+// Model danych
 
 data class Employee(
     var id: Int,
@@ -13,8 +15,20 @@ data class Employee(
 ) : Entity
 
 object Employees : Table<Employee>("employees", Employee::class) {
-    var id = integer("id").primaryKey()
-    var name = varchar("name", 255)
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255).primaryKey()
+}
+
+data class Department(
+    var id: Int,
+    var employee_id: Int,
+    var department_name: String,
+) : Entity
+
+object Departments : Table<Department>("departments", Department::class) {
+    val id = integer("id").primaryKey()
+    val employeeId = integer("employee_id")
+    val departmentName = varchar("department_name", 255)
 }
 
 fun main() {
@@ -23,58 +37,203 @@ fun main() {
     )
     val connection = SQLiteConnection.create(config)
     val executor = CommandExecutor(connection)
-    
-    // 1. Tworzymy dwóch pracowników
-    val employee1 = Employee(-1, "Jan Kowalski")
-    val employee2 = Employee(2, "Anna Nowak")
-    println("Utworzeni pracownicy:")
-    println("Employee 1: $employee1")
-    println("Employee 2: $employee2")
-    println()
-    
-    // 2. Zapisujemy ich do bazy
-    executor.persist(Employees, employee1, employee2)
-    println("Pracownicy zostali zapisani do bazy")
-    println()
-    
-    // 3. Odczytujemy ich z bazy i wyświetlamy
-    val found1 = executor.find(Employees, 1)
-    val found2 = executor.find(Employees, 2)
-    println("Odczytani z bazy pracownicy:")
-    println("Found 1: $found1")
-    println("Found 2: $found2")
-    println()
-    
-    // 4. Usuwamy pierwszego pracownika
-    executor.delete(Employees, 1)
-    println("Usunięto pracownika 1")
-    println()
-    
-    // 5. Modyfikujemy drugiego pracownika
-    found2?.let {
-        it.name = "Anna Kowalska" // zmiana nazwiska
-        executor.update(Employees, it)
-        println("Zmodyfikowano pracownika 2")
+
+    println("=== Test 1: Tworzenie tabel ===")
+    try {
+        val createEmployeesTable = executor.createTable()
+            .fromTable(Employees)
+
+
+        println("Wygenerowane polecenie SQL:")
+        println(createEmployeesTable.build())
+
+        val createDepartmentsTable = executor.createTable()
+            .fromTable(Departments)
+
+        println("Wygenerowane polecenie SQL:")
+        println(createDepartmentsTable.build())
+
+        executor.executeSQL(createEmployeesTable)
+        executor.executeSQL(createDepartmentsTable)
+
+        println("Tabele zostały utworzone.")
+    } catch (e: Exception) {
+        println("Błąd podczas tworzenia tabel: ${e.message}")
     }
-    println()
-    
-    // 6. Próbujemy odczytać obu pracowników (jeden powinien być null)
-    val afterDelete1 = executor.find(Employees, 1)
-    val afterUpdate2 = executor.find(Employees, 2)
-    println("Stan po usunięciu/modyfikacji:")
-    println("Employee 1 (powinien być null): $afterDelete1")
-    println("Employee 2 (zmodyfikowany): $afterUpdate2")
-    println()
-    
-    // 7. Usuwamy drugiego pracownika
-    executor.delete(Employees, 2)
-    println("Usunięto pracownika 2")
-    println()
-    
-    // 8. Próbujemy odczytać obu pracowników (oba null)
-    val final1 = executor.find(Employees, 1)
-    val final2 = executor.find(Employees, 2)
-    println("Stan końcowy (oba powinny być null):")
-    println("Employee 1: $final1")
-    println("Employee 2: $final2")
+
+    println("\n=== Test 2: Wstawianie danych ===")
+    val employee1 = Employee(1, "Jan Kowalski")
+    val employee2 = Employee(2, "Anna Nowak")
+    val department1 = Department(1, 1, "HR")
+    val department2 = Department(2, 2, "IT")
+
+    try {
+        executor.persist(Employees, employee1, employee2)
+        executor.persist(Departments, department1, department2)
+        println("Dane zostały wstawione.")
+    } catch (e: Exception) {
+        println("Błąd podczas wstawiania danych: ${e.message}")
+    }
+
+    println("\n=== Test 3: Sprawdzenie zapisanych danych przez SQL DSL (WHERE) ===")
+    try {
+        val selectBuilder = executor.createSelect()
+            .select("*")
+            .from(Employees)
+            .where("id IN (1, 2)")
+
+        val sql = selectBuilder.build()
+        println("Generated SQL Command:\n$sql")
+
+        val selectCommand = executor.executeSQL(selectBuilder) as SelectCommand
+        println("Wyniki zapytania SELECT:")
+        selectCommand.printResults()
+    } catch (e: Exception) {
+        println("Błąd podczas SELECT: ${e.message}")
+    }
+
+    println("\n=== Test 4: Zapytania JOIN ===")
+    try {
+        val selectBuilderLeftJoin = executor.createSelect()
+            .select(Employees.id, Employees.name, Departments.departmentName)
+            .from(Employees)
+            .leftJoin(Departments, Employees.id , Departments.employeeId)
+            .where("departments.department_name IS NOT NULL")
+
+        val sqlLeftJoin = selectBuilderLeftJoin.build()
+        println("Generated SQL (LEFT JOIN):\n$sqlLeftJoin")
+
+        val selectBuilderInnerJoin = executor.createSelect()
+            .select(Employees.id, Employees.name, Departments.departmentName)
+            .from(Employees)
+            .innerJoin(Departments, Employees.id, Departments.employeeId)
+            .where("departments.department_name = 'IT'")
+
+        val sqlInnerJoin = selectBuilderInnerJoin.build()
+        println("Generated SQL (INNER JOIN):\n$sqlInnerJoin")
+
+    } catch (e: Exception) {
+        println("Błąd przy testach JOIN: ${e.message}")
+    }
+
+    println("\n=== Test 5: GROUP BY, HAVING, ORDER BY ===")
+    try {
+        val selectGroupByHaving = executor.createSelect()
+            .select(Departments.departmentName, "COUNT(*) AS employee_count")
+            .from(Departments)
+            .groupBy(Departments.departmentName)
+            .having("employee_count > 1")
+
+        val sqlGroupByHaving = selectGroupByHaving.build()
+        println("Generated SQL (GROUP BY, HAVING):\n$sqlGroupByHaving")
+
+        val selectOrderBy = executor.createSelect()
+            .select(Employees.id, Employees.name)
+            .from(Employees)
+            .orderBy("name ASC", "id DESC")
+
+        val sqlOrderBy = selectOrderBy.build()
+        println("Generated SQL (ORDER BY):\n$sqlOrderBy")
+
+    } catch (e: Exception) {
+        println("Błąd przy testach GROUP BY / HAVING / ORDER BY: ${e.message}")
+    }
+
+    println("\n=== Test 6: UNION i UNION ALL ===")
+    try {
+        // Drugie zapytanie SELECT
+        val selectUnion = executor.createSelect()
+            .select(Employees.id, Employees.name)
+            .from(Employees)
+            .where("id > 2")
+            .build()
+
+        // Budowanie zapytania UNION
+        val unionBuilder = executor.createSelect()
+            .select(Employees.id, Employees.name)
+            .from(Employees)
+            .where("id <= 2")
+            .union(selectUnion)  // Dodaj drugie zapytanie jako część UNION
+
+        // Generowanie finalnego SQL
+        val sqlUnion = unionBuilder.build()
+        println("Generated SQL (UNION, UNION ALL):\n$sqlUnion")
+
+    } catch (e: Exception) {
+        println("Błąd przy testach UNION: ${e.message}")
+    }
+    println("\n=== Test 7: Funkcje agregujące ===")
+    try {
+        val selectAggregate = executor.createSelect()
+            .select(
+                SelectBuilder().count("id") + " AS total_employees",
+                SelectBuilder().sum("id") + " AS total_id",
+                SelectBuilder().avg("id") + " AS avg_id"
+            )
+            .from(Employees)
+
+        val sqlAggregate = selectAggregate.build()
+        println("Generated SQL (Aggregate Functions):\n$sqlAggregate")
+
+    } catch (e: Exception) {
+        println("Błąd przy testach funkcji agregujących: ${e.message}")
+    }
+
+    println("\n=== Test 8: Podzapytania (Subqueries) ===")
+    try {
+        val subQuery = executor.createSelect()
+            .select("AVG(id)")
+            .from(Employees)
+            .build()
+
+        val selectSubQuery = executor.createSelect()
+            .select(Employees.id, Employees.name)
+            .from(Employees)
+            .where("id > ($subQuery)")
+
+        val sqlSubQuery = selectSubQuery.build()
+        println("Generated SQL (Subquery):\n$sqlSubQuery")
+
+    } catch (e: Exception) {
+        println("Błąd przy testach podzapytań: ${e.message}")
+    }
+
+    println("\n=== Test 9: Usuwanie danych ===")
+    try {
+        val deleteBuilder = executor.createDelete()
+            .from(Employees)
+            .where("id = 1")
+
+        val sqlDelete = deleteBuilder.build()
+        println("Generated SQL Command:\n$sqlDelete")
+
+        val deleteCommand = executor.executeSQL(deleteBuilder) as DeleteCommand
+        println("Usunięto rekordów: ${deleteCommand.getAffectedRows()}")
+    } catch (e: Exception) {
+        println("Błąd podczas usuwania danych: ${e.message}")
+    }
+
+    println("\n=== Test 10: Aktualizacja danych ===")
+    try {
+        val updatedEmployee = Employee(2, "Anna Kowalska")
+        executor.update(Employees, updatedEmployee)
+        println("Dane zostały zaktualizowane.")
+    } catch (e: Exception) {
+        println("Błąd podczas aktualizacji danych: ${e.message}")
+    }
+
+    println("\n=== Test 11: Usuwanie tabel ===")
+    try {
+        val dropEmployeesTable = executor.dropTable(Employees)
+        val dropDepartmentsTable = executor.dropTable(Departments)
+
+        executor.executeSQL(dropEmployeesTable)
+        executor.executeSQL(dropDepartmentsTable)
+
+        println("Tabele zostały usunięte.")
+    } catch (e: Exception) {
+        println("Błąd podczas usuwania tabel: ${e.message}")
+    }
+
+    connection.close()
 }

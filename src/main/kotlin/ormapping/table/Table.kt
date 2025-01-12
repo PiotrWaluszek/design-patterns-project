@@ -28,30 +28,40 @@ abstract class Table<T : Entity>(
     private val _primaryKey = mutableListOf<Column<*>>()
     val primaryKey: List<Column<*>>
         get() = _primaryKey.toList()
+
+    fun addForeignKey(fk: ForeignKey) {
+        _foreignKeys.add(fk)
+    }
     
     fun integer(name: String): Column<Int> = Column<Int>(name, Int::class).also {
         _columns.add(it)
+        it.table = this
     }
     
     fun varchar(name: String, length: Int): Column<String> = Column<String>(name, String::class, length = length).also {
         _columns.add(it)
+        it.table = this
     }
     
     fun text(name: String): Column<String> = Column<String>(name, String::class).also {
         _columns.add(it)
+        it.table = this
     }
     
     fun boolean(name: String): Column<Boolean> = Column<Boolean>(name, Boolean::class).also {
         _columns.add(it)
+        it.table = this
     }
     
     fun date(name: String): Column<LocalDate> = Column<LocalDate>(name, LocalDate::class).also {
         _columns.add(it)
+        it.table = this
     }
     
     fun decimal(name: String, precision: Int, scale: Int): Column<BigDecimal> =
         Column<BigDecimal>(name, BigDecimal::class, precision = precision, scale = scale).also {
             _columns.add(it)
+            it.table = this
         }
     
     

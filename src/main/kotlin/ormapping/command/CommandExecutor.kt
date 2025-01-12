@@ -1,6 +1,8 @@
 package ormapping.command
 
+
 import ormapping.connection.DatabaseConnection
+import ormapping.sql.*
 import ormapping.entity.Entity
 import ormapping.table.CascadeType
 import ormapping.table.Relation
@@ -15,6 +17,27 @@ import kotlin.reflect.full.memberProperties
 class CommandExecutor(
     private val connection: DatabaseConnection,
 ) {
+    fun createSelect(): SelectBuilder = SelectBuilder()
+
+    fun createDelete(): DeleteBuilder = DeleteBuilder()
+
+    fun createTable(): CreateTableBuilder = CreateTableBuilder()
+
+    fun dropTable(table: Table<*>): DropTableBuilder {
+        return DropTableBuilder(connection.getDialect(), table, this)
+    }
+    // Metoda wykonująca zbudowane zapytanie
+    fun executeSQL(builder: SQLBuilder): SQLCommand {
+        val sql = builder.build()
+        return when (builder) {
+            is SelectBuilder -> SelectCommand(sql)
+            is DeleteBuilder -> DeleteCommand(sql)
+            is CreateTableBuilder -> CreateTableCommand(sql)
+            is DropTableBuilder -> DropTableCommand(sql)
+            else -> throw IllegalArgumentException("Unknown builder type")
+        }.also { it.execute(connection) }
+    }
+
     fun <T : Entity> find(table: Table<T>, value: Any): T? {
         val primaryKeyColumns = table.primaryKey
         if (primaryKeyColumns.isEmpty()) {
