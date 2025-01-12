@@ -11,25 +11,20 @@ import java.util.concurrent.ConcurrentHashMap
  * Each log destination is uniquely identified by its filename and maintains its own FileWriter.
  */
 class MultiDestinationLogger private constructor() {
-    // Thread-safe map to store FileWriters for different log destinations
     private val logDestinations = ConcurrentHashMap<String, FileWriter>()
-    
-    // Format for timestamp in log entries
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    
+
     companion object {
-        // Volatile ensures thread safety for double-checked locking
         @Volatile
         private var instance: MultiDestinationLogger? = null
-        
-        // Thread-safe getInstance implementation using double-checked locking
+
         fun getInstance(): MultiDestinationLogger {
             return instance ?: synchronized(this) {
                 instance ?: MultiDestinationLogger().also { instance = it }
             }
         }
     }
-    
+
     /**
      * Initializes a new log destination with the specified filename.
      * If the destination already exists, it will be reused.
@@ -41,16 +36,14 @@ class MultiDestinationLogger private constructor() {
         try {
             if (!logDestinations.containsKey(filename)) {
                 val file = File(filename)
-                // Create parent directories if they don't exist
                 file.parentFile?.mkdirs()
-                // Create or append to the file
                 logDestinations[filename] = FileWriter(file, true)
             }
         } catch (e: Exception) {
             throw IllegalArgumentException("Failed to initialize log destination: $filename", e)
         }
     }
-    
+
     /**
      * Logs a message to the specified destination file.
      *
@@ -62,7 +55,7 @@ class MultiDestinationLogger private constructor() {
         val writer = logDestinations[filename] ?: throw IllegalStateException(
             "Log destination '$filename' not initialized. Call initializeLogDestination() first."
         )
-        
+
         synchronized(writer) {
             try {
                 val timestamp = LocalDateTime.now().format(dateFormatter)
@@ -73,7 +66,7 @@ class MultiDestinationLogger private constructor() {
             }
         }
     }
-    
+
     /**
      * Closes all open log destinations.
      * Should be called when the application is shutting down.
@@ -83,7 +76,6 @@ class MultiDestinationLogger private constructor() {
             try {
                 writer.close()
             } catch (e: Exception) {
-                // Ignore closing errors
             }
         }
         logDestinations.clear()

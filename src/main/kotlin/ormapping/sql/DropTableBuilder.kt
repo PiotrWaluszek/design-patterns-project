@@ -6,8 +6,11 @@ import ormapping.dialect.SQLDialect
 import ormapping.table.Table
 
 /**
- * Builder, który generuje instrukcję:
- *   DROP TABLE [IF EXISTS] tableName [CASCADE]
+ * Builder that generates a `DROP TABLE` SQL statement.
+ * Supports optional `IF EXISTS` and `CASCADE` clauses based on SQL dialect.
+ *
+ * Example output:
+ * `DROP TABLE [IF EXISTS] tableName [CASCADE]`
  */
 class DropTableBuilder(
     private val dialect: SQLDialect,
@@ -20,7 +23,10 @@ class DropTableBuilder(
     private var cascade = false
 
     /**
-     * Ustawia tabelę na podstawie obiektu `Table<*>`.
+     * Sets the target table for the drop operation using a [Table] object.
+     *
+     * @param table The table definition to be dropped.
+     * @return The current [DropTableBuilder] instance for chaining.
      */
     fun fromTable(table: Table<*>): DropTableBuilder {
         this.tableName = table._name
@@ -28,7 +34,10 @@ class DropTableBuilder(
     }
 
     /**
-     * Ustawia tabelę na podstawie nazwy w postaci String.
+     * Sets the target table for the drop operation using its name.
+     *
+     * @param tableName The name of the table to be dropped.
+     * @return The current [DropTableBuilder] instance for chaining.
      */
     fun from(tableName: String): DropTableBuilder {
         this.tableName = tableName
@@ -36,8 +45,11 @@ class DropTableBuilder(
     }
 
     /**
-     * Dodaje klauzulę IF EXISTS (jeśli dialekt ją wspiera).
-     * Przykład: DROP TABLE IF EXISTS ...
+     * Adds the `IF EXISTS` clause to the `DROP TABLE` statement.
+     *
+     * Note: Not all SQL dialects support this clause. Unsupported dialects may ignore it or throw an error.
+     *
+     * @return The current [DropTableBuilder] instance for chaining.
      */
     fun ifExists(): DropTableBuilder {
         this.ifExists = true
@@ -45,8 +57,11 @@ class DropTableBuilder(
     }
 
     /**
-     * Dodaje klauzulę CASCADE (jeśli dialekt ją wspiera).
-     * Przykład: DROP TABLE ... CASCADE
+     * Adds the `CASCADE` clause to the `DROP TABLE` statement.
+     *
+     * Note: The `CASCADE` clause may behave differently across SQL dialects.
+     *
+     * @return The current [DropTableBuilder] instance for chaining.
      */
     fun cascade(): DropTableBuilder {
         this.cascade = true
@@ -54,20 +69,17 @@ class DropTableBuilder(
     }
 
     /**
-     * Buduje finalne zapytanie w stylu:
-     *   DROP TABLE [IF EXISTS] tableName [CASCADE]
+     * Builds the final `DROP TABLE` SQL statement.
+     *
+     * @return The SQL `DROP TABLE` statement as a string.
      */
     override fun build(): String = buildString {
         append("DROP TABLE ")
         if (ifExists) {
-            // Dialekt np. PostgreSQL wspiera IF EXISTS,
-            // inne bazy mogą to ignorować lub rzucić błąd.
             append("IF EXISTS ")
         }
         append(tableName)
         if (cascade) {
-            // W PostgreSQL: "CASCADE";
-            // w innych dialektach może to nie działać lub działać inaczej.
             append(" CASCADE")
         }
     }
