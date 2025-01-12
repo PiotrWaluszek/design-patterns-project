@@ -14,6 +14,7 @@ class Column<T>(
     val scale: Int = 0,
     val precision: Int = 0,
 
+
 ) {
     lateinit var table: Table<*>
 }

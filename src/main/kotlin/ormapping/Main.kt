@@ -16,7 +16,7 @@ data class Employee(
 
 object Employees : Table<Employee>("employees", Employee::class) {
     val id = integer("id").primaryKey()
-    val name = varchar("name", 255)
+    val name = varchar("name", 255).primaryKey()
 }
 
 data class Department(
